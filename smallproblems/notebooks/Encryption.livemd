@@ -1,0 +1,177 @@
+<!-- livebook:{"autosave_interval_s":60} -->
+
+# Caesar's Cipher
+
+```elixir
+Mix.install(
+  [
+    {:smallproblems, path: Path.join(__DIR__, ".."), env: :dev}
+  ]
+)
+```
+
+## Encoding / Decoding
+
+[Caesar's cipher](https://en.wikipedia.org/wiki/Caesar_cipher) is one of the simplest and most widely known encryption techniques. It is a type of substitution cipher in which each letter in the plaintext is replaced by a letter some fixed number of positions down the alphabet.
+
+The code for this notebook is implemented in the module `Caesar` of the accompanying Elixir project `smallproblems`.
+
+Let's see the code in action by encoding / decoding a simple phrase:
+
+```elixir
+pangram = "The\tquick brown fox,\n'jumps' __123__\tover the **lazy** dog!!"
+IO.puts(pangram)
+cipher = Caesar.encode(pangram, 3)
+```
+
+Observe that only ascii letters are encoded; all other characters, including digits, whitespace and punctuation, are removed during encoding.
+The main reason for doing so is to blur the lexical structure of the message, making it harder to break the cipher.
+This is also reflected in the decoded message:
+
+```elixir
+Caesar.decode(cipher, 3)
+```
+
+### Working with Strings
+
+The Module `Caesar` is an example of how to work with [strings](https://hexdocs.pm/elixir/String.html) in Elixir.
+Let's go through the code step by step:
+
+```{elixir}
+def encode(plaintext, key) when is_binary(plaintext) do
+  charlist = plaintext
+    |> String.trim
+    |> String.upcase
+    |> String.to_charlist
+  if List.ascii_printable?(charlist) do
+    charlist
+    |> Enum.map(fn char -> shift(char, key) end)
+    |> List.to_string
+    |> String.replace("/", "")
+  else
+    IO.puts("Cannot encode #{charlist}.")
+  end
+end
+```
+
+The function `encode` is defined with a [guard](https://hexdocs.pm/elixir/patterns-and-guards.html), introduced with the keyword `when`: this function clause matches only if the first argument `plaintext` is a *binary*, i.e. a string.
+Calling `encode` with any other argument will lead to a *FunctionClauseError*;
+so we define a second function clause
+
+```{elixir}
+def encode(_something, _key) do
+  IO.puts("Cannot encode something else than strings.")
+end
+```
+
+just to inform the user that `encode` only works with strings.
+This clause will always match if the first argument is not a string.
+
+```elixir
+Caesar.encode([1,2,3], 3)
+```
+
+There's more than one way to work with strings: in an imperative setting we would iterate over the characters of the string (probably with a for-loop) and apply the desired transformations step by step.\
+But with functional programming we have another choice: first, we transform the string into a list of characters, and then use the *higher-order* function `Enum.map` to apply the transformations at once.
+Here's the first step:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+charlist = plaintext
+  |> String.trim
+  |> String.upcase
+  |> String.to_charlist
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+The result of the expression to the right of `=` is bound to the value `charlist`.
+The expression consists of three function calls, joined with the pipe-operator `|>`: clean up the string, convert it to upper-case characters, and transform it into a list of integer codepoints.
+
+Observe that the resulting `charlist` is in fact a list of integers, i.e. the decimal representation of the respective character codepoints.
+This fact will prove useful when shifting the characters later.
+
+<!-- livebook:{"break_markdown":true} -->
+
+If the list consists only of printable ascii characters, we apply the second step (the actual transformation):
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+if List.ascii_printable?(charlist) do
+  charlist
+    |> Enum.map(fn char -> shift(char, key) end)
+    |> List.to_string
+    |> String.replace("/", "")
+```
+
+Here, the call to `Enum.map` is the important part, where the characters are shifted to their new position.
+Afterwards, the `charlist` is converted back to a string, and finally some not convertible characters `/` are removed.
+
+If the `charlist` contains non-ascii characters, we inform the user that the message cannot be encoded:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+if List.ascii_printable?(charlist) do
+  ...
+else
+  IO.puts("Cannot encode #{charlist}.")
+end
+```
+
+```elixir
+Caesar.encode("héllò", 3)
+```
+
+But now to the main part of our program's logic: shifting each character by a number of `key` positions. 
+The function `shift` is called for every codepoint of the `charlist`:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def shift(char, key) do
+  if char >= ?A and char <= ?Z do
+    norm = char - ?A
+    Integer.mod(norm + key, 26) + ?A
+  else
+    ?/
+  end
+end
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+If the current character is an upper-case letter (A, B, C, ..., Z), we normalize it by subtracting `?A`, which is the ascii integer code for the character `A`, i.e. 65.
+With that, the letter is reperesented by a number between `A=0` and `Z=25`.\
+Now we compute $norm + key \mod 26$, to make sure that the shifted value stays in in the range `0..25`.
+The `mod` function just calculates the remainder of an euclidian division with the given arguments.
+Finally, we add `?A` to get the actual (denormalized) letter.
+
+Let's give an example for `Y=89` and `key=3`:
+$$
+\begin{align*}
+norm = 89-65 &= 24 \\
+(24+3) \mod 26 &= 1 \\
+1 + 65 = 66 &= \textrm{B}
+\end{align*}
+$$
+So, we have shifted `Y` 3 places down the aplphabet to `B` (Z->A->B), respecting the turn-over at the beginning/end of the alphabet.
+
+```elixir
+Caesar.shift(?Y, 3)
+```
+
+If the current character is not an upper-case letter, we return an arbitrary `/` character, since we don't know how to convert it.
+We could also return the character unchanged (maintaining digits, whitespace and punctuation), but this would make the cipher easy to break.
+
+## Breaking Caesar's Cipher
+
+As with all single-alphabet substitution ciphers, the Caesar cipher is easily broken and in modern practice offers essentially no communications security.
+
+We want to break the cipher with a technique called [frequency analysis](https://en.wikipedia.org/wiki/Frequency_analysis):
+
+```elixir
+BreakCaesar.percent(5, 15)
+```

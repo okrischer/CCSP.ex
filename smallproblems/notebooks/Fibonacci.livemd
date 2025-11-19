@@ -1,0 +1,278 @@
+<!-- livebook:{"autosave_interval_s":60} -->
+
+# The Fibonacci Sequence
+
+```elixir
+Mix.install(
+  [
+    {:smallproblems, path: Path.join(__DIR__, ".."), env: :dev}
+  ]
+)
+```
+
+## Computing Fibonacci Numbers
+
+The Fibonacci sequence can be defined by the [recurrence relation](https://en.wikipedia.org/wiki/Recurrence_relation)
+$$
+\begin{align*}
+F_0 &= 0 \\
+F_1 &= 1 \\
+F_n &= F_{n-1} + F_{n-2},
+\end{align*}
+$$
+which reads in plain English as: the zeroth Fibonacci number is 0, the first is 1, and every subsequent number is the sum of its two predecessors.
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Recursive Computation
+
+The representation of Fibonacci numbers as a *recurrence relation* makes it easy to formulate a [recursive algorithm](https://en.wikipedia.org/wiki/Recursion_(computer_science)):
+
+* Define one or more base cases for the initial conditions:
+
+```{elixir}
+  def recursive(0), do: 0
+  def recursive(1), do: 1
+```
+
+Whenever a base case is reached (calling `recursive` with argument 0 or 1), the algorithm terminates and the final result is returned.
+
+* Define the recursive case:
+
+```{elixir}
+  def recursive(n), do: recursive(n-1) + recursive(n-2)
+```
+
+The function `recursive` is in fact *recursive*, as the function calls itself with a modified argument (actually `recursive` calls itself twice).
+In order to avoid infinite loops, the argument for the recursive call must be modified such that eventually the base case is reached (in our case with `n-1` and `n-2`).
+
+I have used multiple clauses with [pattern matching](https://hexdocs.pm/elixir/pattern-matching.html) and the `do:` syntax for defining `recursive`, as this representation lends itself naturally to the underlying recurrence relation.
+But we could write it also with `do`-block syntax, using [conditional logic](https://hexdocs.pm/elixir/case-cond-and-if.html) like so:
+
+```{elixir}
+  def recursive(n) do
+    case n do
+      0 -> 0
+      1 -> 1
+      n -> recursive(n-1) + recursive(n-2)
+    end
+  end
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+All the functions in this notebook are defined in a module `Fibonacci`, which is imported from the Elixir project `smallproblems`.
+Thus, we can our functions like so:
+
+```elixir
+Fibonacci.recursive(42)
+```
+
+Calculating the 42. Fibonacci number takes about 2 seconds to return.
+That's an eternity for such a simple algorithm, but not a surprise: 
+calling itself twice, `recursive` creates a *tree recursion*, where every node has to be touched multiple times.
+
+It can be shown that this process uses a number of steps that grows exponentially with the input, resulting in an exponential running time.
+In our example `n=42` the call `recursive(42)` has to compute more than 250 million steps.
+
+<!-- livebook:{"break_markdown":true} -->
+
+### Iterative Computation
+
+The *tree recursion* from above can be transformed into a *single recursion* whith linear running time.
+The idea is to use a pair of integers `a` and `b`, initialized to 0 and 1, and to repeatedly apply the simultaneous transformations
+
+$$
+\begin{align*}
+a &\gets b,\\
+b &\gets a+b.
+\end{align*}
+$$
+
+With that, we can compute Fibonacci numbers in an *iterative* style; the function `iterative(n)` showcases how:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+  def iterative(n), do: iter(0, 1, n)
+  defp iter(a, _, 0), do: a
+  defp iter(a, b, n), do: iter(b, a+b, n-1)
+```
+
+Observe that, with a functional programming language like Elixir, we cannot use loops. Instead the iteration is implemented via recursion: the function `iter` has a base case for `n=0` and calls itself with a continuously decreasing parameter `n-1` for the recursive case.
+
+```elixir
+Fibonacci.iterative(42)
+```
+
+This second method for computing Fibonacci numbers is the equivalent of an iterative process, resulting in a linear running time.
+This algorithm uses only `n=42` steps, allowing the function to return the result in less than a millisecond.\
+Let's check the performance of this function with a large input value `n=1000`:
+
+```elixir
+fib_1000 = Fibonacci.iterative(1000)
+Integer.digits(fib_1000) |> length()
+```
+
+The result is a huge number with 209 digits (far more than the number of atoms in the universe).
+But still, the process is linear and needs only `n=1000` steps to compute.
+Hence, the function still returns within a few milliseconds.
+
+## Memoization
+
+Memoization is an optimization technique used to speed up long running computational tasks.
+It works by storing intermediate results in an internal cache, from where these results can be retrieved very fast, without the need to compute them over and over again.
+
+We'll use that technique to compute Fibonacci numbers in an efficient way:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def memoize(n), do: calc_fib(%{0 => 0, 1 => 1}, n)
+
+def calc_fib(cache, n) do
+  case cache[n] do
+    nil ->
+      {n_1, cache} = calc_fib(cache, n-1)
+      result = n_1 + cache[n-2]
+      {result, Map.put(cache, n, result)}
+    value ->
+      {value, cache}
+  end
+end
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+`memoize` just calls `calc_fib`, providing the initial cache.\
+`calc_fib` checks whether `n` is already in the chache; if so, it returns the corresponding value.
+If not, the new value for `n` ist computed recursively and the cache gets updated accordingly.
+
+In both cases, `calc-fib` returns a tuple containing the result and the current cache.
+Thus, we can call the function and destructure the return value like so:
+
+```elixir
+{result, cache} = Fibonacci.memoize(42)
+result
+```
+
+We can also inspect all the intermediate values form the chache:
+
+```elixir
+cache
+```
+
+That works as expected, so let's call it with a large input `n=1000`:
+
+```elixir
+{result, cache} = Fibonacci.memoize(1000)
+Integer.digits(result) |> length()
+```
+
+The computation evaluates in a few millisecond, so it's reasonable efficient.\
+In fact, using *memoization* transforms the *multiple recursion* into a *single recursion* with linear running time.
+
+But our implementation has one major drawback: every time we call `memoize`, the internal cache has to be computed from scratch, potentially slowing down our application.
+
+## A Fibonacci Server
+
+In order to improve our memoization approach, we need to store the already computed numbers in a global cache.
+However, values in Elixir are immutable and therefore cannot hold state.
+But Elixir processes can.
+
+In Elixir, processes are very lightweight constructs, nothing like regular OS processes: you can create a million processes on a single machine without affecting performance.\
+We're going to use that feature and build a simple Fibonacci server based on an Elixir `Agent`.
+
+<!-- livebook:{"break_markdown":true} -->
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def start_agent do
+  Agent.start_link(fn -> %{0 => 0, 1 => 1} end)
+end
+
+def fib(pid, n) when n >= 0 do
+  Agent.get_and_update(pid, &calc_fib(&1, n))
+end
+```
+
+Here, I just replaced the `memoize` function from above with a function `start_agent`, which creates a new agent and initializes its cache with the same `Map` as before.\
+The function `fib` retrieves the value for `n` by calling the agent's `get_and_update` function, providing another function, which tells the agent how to compute the result.
+For this, we use our existing function `calc_fib`.
+
+We can then create a new agent und use it like so:
+
+```elixir
+{:ok, agent} = Fibonacci.start_agent()
+result = Fibonacci.fib(agent, 1000)
+Integer.digits(result) |> length()
+```
+
+Creating an agent and computing the thousandth Fibonacci number takes a few milliseconds on my machine.
+But every subsequent call with an arbitrary number just retrieves the corresponding value from the cache in less than a millisecond:
+
+```elixir
+result = Fibonacci.fib(agent, 958)
+Integer.digits(result) |> length()
+```
+
+## Parallel Computing
+
+As we have seen, Elixir processes can hold state; but we can use them also for *asynchronous* and *parallel* computing.
+For example, we could implement a parallel map function and use it for computing several Fibonacci numbers at once.
+
+The standard `map` function from the module `Enum` takes a collection and a function, and transforms the elements of the collection with the given function into a new collection. Let's use it to map the first ten natural numbers to their respective squares:
+
+```elixir
+Enum.map(1..10, fn n -> n * n end)
+```
+
+Here, the transformation function is given as an [anonymous function](https://hexdocs.pm/elixir/anonymous-functions.html) with `arrow`-syntax.
+We could also use the capture operator `&`, and represent the first (and only) argument to that function with `&1`:
+
+```elixir
+Enum.map 1..10, &(&1 * &1)
+```
+
+Our goal is to implement a `pmap` function with the same behaviour, but working in parallel:
+
+<!-- livebook:{"force_markdown":true} -->
+
+```elixir
+def pmap(collection, fun) do
+  me = self()
+  collection
+  |> Enum.map(fn e -> spawn_link(fn -> (send me, {self(), fun.(e)}) end) end)
+  |> Enum.map(fn pid -> receive do {^pid, result} -> result end end)
+end
+```
+
+<!-- livebook:{"break_markdown":true} -->
+
+Here, `pmap` maps every element of the collection to a new process (using `Enum.map` and `spawn_link`), providing the given function `fun` as the instruction how to compute the result.
+In a second pass, the results of those processes are collected and returned as a new collection.
+
+The code uses the [pipe operator](https://hexdocs.pm/elixir/enumerable-and-streams.html), which is usful for chaining several computations in a row:
+the expression `collection |> Enum.map(fun)` is equivalent to `Enum.map(collection, fun)`.\
+Also obeserve the usage of the pin operator `^`:
+since variables in Elixir can be rebound, we use the pin operator `^` to pattern match against a variable's existing value rather than rebinding the variable.
+This ensures that the results are returned in the same order as the processes were created.
+
+Let's test `pmap` with the same arguments as for our introductory example:
+
+```elixir
+Fibonacci.pmap 1..10, &(&1 * &1)
+```
+
+That's the expected result; but did it really run in parallel?\
+To prove that, let's call `pmap` with the long-running `recursive` function and a list of ten Fibonacci numbers to compute:
+
+```elixir
+List.duplicate(42, 10) |> Fibonacci.pmap(&(Fibonacci.recursive(&1)))
+```
+
+The result returns in about 3 seconds on my machine (a mac M2 pro with 10 CPU cores).
+A single call to `Fibonacci.recursive` consumed 2 seconds, so we need just 1 second more for computing 10 values.
+
+Obviously, the computation was actually performed in parallel, utilizing all 10 cores on my machine, and reducing the expected running time by 17 seconds, i.e. 85%.
