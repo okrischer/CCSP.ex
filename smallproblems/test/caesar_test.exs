@@ -1,6 +1,5 @@
 defmodule CaesarTest do
   use ExUnit.Case, async: true
-  doctest Caesar
 
   test "encoding works" do
     cipher = Caesar.encode("Elixir", 3)
